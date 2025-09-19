@@ -1,6 +1,6 @@
 import AuthButton from '@/components/AuthButton'
 
-export default function Home() {
+export default function Login() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-green-50 flex items-center justify-center p-4">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8 text-center">
@@ -9,20 +9,8 @@ export default function Home() {
             🏫 週案くん
           </h1>
           <p className="text-gray-600">
-            小学校教員向け<br />週案自動生成システム
+            ログインが必要です
           </p>
-        </div>
-        
-        <div className="mb-8">
-          <h2 className="text-lg font-semibold text-gray-700 mb-4">
-            主な機能
-          </h2>
-          <ul className="text-sm text-gray-600 space-y-2 text-left">
-            <li>✅ 週案の自動生成</li>
-            <li>✅ 時数管理・アラート</li>
-            <li>✅ 行事対応の時間割調整</li>
-            <li>✅ Word/Excel出力</li>
-          </ul>
         </div>
         
         <div className="mb-6">
@@ -30,7 +18,7 @@ export default function Home() {
         </div>
         
         <p className="text-xs text-gray-500">
-          Googleアカウントでログインして始めましょう
+          Googleアカウントでログインしてください
         </p>
       </div>
     </div>
