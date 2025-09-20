@@ -38,7 +38,7 @@ export const trackPageView = (page: string) => {
 }
 
 // エラー境界で使用するエラー追跡
-export const trackError = (error: Error, errorInfo: any) => {
+export const trackError = (error: Error, errorInfo: { componentStack?: string }) => {
   track('react_error', {
     error: error.message,
     stack: error.stack,

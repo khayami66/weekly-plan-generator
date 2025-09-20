@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
 
 interface User {
@@ -49,16 +49,16 @@ export default function HoursManagement({ user, userSubjects }: HoursManagementP
   const [hoursData, setHoursData] = useState<HoursData[]>([])
   const [selectedGrade, setSelectedGrade] = useState<number>(user.grade || 5)
   const [currentMonth, setCurrentMonth] = useState(new Date().getMonth() + 1)
-  const [academicYear, setAcademicYear] = useState(() => {
+  const [academicYear] = useState(() => {
     const now = new Date()
     return now.getMonth() >= 3 ? now.getFullYear() : now.getFullYear() - 1
   })
   const [loading, setLoading] = useState(true)
 
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   // 学年ごとの年間標準時数（文科省基準）
-  const standardHours: Record<number, Record<string, number>> = {
+  const standardHours: Record<number, Record<string, number>> = useMemo(() => ({
     5: {
       '国語': 175,
       '算数': 175,
@@ -87,13 +87,9 @@ export default function HoursManagement({ user, userSubjects }: HoursManagementP
       '総合的な学習の時間': 70,
       '特別活動': 35
     }
-  }
+  }), [])
 
-  useEffect(() => {
-    loadHoursData()
-  }, [selectedGrade, currentMonth, academicYear])
-
-  const loadHoursData = async () => {
+  const loadHoursData = useCallback(async () => {
     setLoading(true)
     try {
       const relevantSubjects = user.role === 'homeroom'
@@ -102,7 +98,7 @@ export default function HoursManagement({ user, userSubjects }: HoursManagementP
 
       const hoursPromises = relevantSubjects.map(async (userSubject) => {
         // 累積計画時数・実績時数を取得
-        const { data: hoursRecords } = await supabase
+        await supabase
           .from('hours_management')
           .select('*')
           .eq('user_id', user.id)
@@ -125,12 +121,12 @@ export default function HoursManagement({ user, userSubjects }: HoursManagementP
           .lte('weekly_plans.week_start_date', `${academicYear + 1}-03-31`)
 
         const currentMonthEndDate = new Date(academicYear, currentMonth, 0)
-        const actualHoursFiltered = actualHours?.filter(record => {
+        const actualHoursFiltered = actualHours?.filter((record: { hours?: number; weekly_plans: { week_start_date: string } }) => {
           const weekDate = new Date(record.weekly_plans.week_start_date)
           return weekDate <= currentMonthEndDate
         })
 
-        const totalActualHours = actualHoursFiltered?.reduce((sum, record) => sum + (record.hours || 0), 0) || 0
+        const totalActualHours = actualHoursFiltered?.reduce((sum: number, record: { hours?: number }) => sum + (record.hours || 0), 0) || 0
 
         // 年間標準時数
         const annualPlanned = standardHours[selectedGrade]?.[userSubject.subjects.name] || 0
@@ -170,7 +166,11 @@ export default function HoursManagement({ user, userSubjects }: HoursManagementP
     } finally {
       setLoading(false)
     }
-  }
+  }, [user.role, user.id, userSubjects, selectedGrade, supabase, academicYear, standardHours, currentMonth])
+
+  useEffect(() => {
+    loadHoursData()
+  }, [loadHoursData])
 
   const getVarianceColor = (variance: number) => {
     if (variance >= 0) return 'text-green-600'

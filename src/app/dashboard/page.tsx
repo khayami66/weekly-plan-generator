@@ -16,7 +16,7 @@ export default async function Dashboard() {
     .from('users')
     .select('*')
     .eq('id', user.id)
-    .single()
+    .single() as { data: { role: 'homeroom' | 'specialist' } | null }
 
   if (!userData) {
     // First time user - show setup wizard

@@ -1,6 +1,7 @@
 import { createServerClientComponent } from '@/lib/supabase-server'
 import { redirect } from 'next/navigation'
 import SetupWizard from '@/components/SetupWizardFixed'
+import SettingsSummary from '@/components/SettingsSummary'
 
 export default async function Settings() {
   const supabase = await createServerClientComponent()
@@ -44,19 +45,27 @@ export default async function Settings() {
           </div>
         </header>
 
-        <div className="bg-white rounded-lg shadow-sm p-6">
-          {userData ? (
-            <SetupWizard user={user} userData={userData} isEditMode={true} />
-          ) : (
+        {userData ? (
+          <SettingsSummary
+            user={{
+              id: user.id,
+              email: user.email!,
+              role: userData.role,
+              grade: userData.grade,
+              class_number: userData.class_number
+            }}
+          />
+        ) : (
+          <div className="bg-white rounded-lg shadow-sm p-6">
             <div className="text-center py-8">
               <p className="text-gray-600 mb-4">
                 まだ設定が保存されていません。<br />
                 初期設定を行ってください。
               </p>
-              <SetupWizard user={user} userData={null} isEditMode={false} />
+              <SetupWizard user={user} userData={undefined} isEditMode={false} />
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </div>
     </div>
   )

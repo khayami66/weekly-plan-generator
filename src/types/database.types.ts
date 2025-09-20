@@ -159,6 +159,7 @@ export type Database = {
           is_default: boolean | null
           start_date: string | null
           end_date: string | null
+          daily_periods: Json | null
           created_at: string
         }
         Insert: {
@@ -168,6 +169,7 @@ export type Database = {
           is_default?: boolean | null
           start_date?: string | null
           end_date?: string | null
+          daily_periods?: Json | null
           created_at?: string
         }
         Update: {
@@ -177,6 +179,7 @@ export type Database = {
           is_default?: boolean | null
           start_date?: string | null
           end_date?: string | null
+          daily_periods?: Json | null
           created_at?: string
         }
       }

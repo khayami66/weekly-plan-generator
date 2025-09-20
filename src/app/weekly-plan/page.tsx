@@ -16,7 +16,7 @@ export default async function WeeklyPlanPage() {
     .from('users')
     .select('*')
     .eq('id', user.id)
-    .single()
+    .single() as { data: { role: 'homeroom' | 'specialist'; grade?: number; class_number?: number } | null }
 
   if (!userData) {
     redirect('/dashboard')
@@ -56,9 +56,15 @@ export default async function WeeklyPlanPage() {
           </div>
         </header>
 
-        <SimpleWeeklyPlan 
-          user={userData} 
-          userSubjects={userSubjects || []} 
+        <SimpleWeeklyPlan
+          user={{
+            id: user.id,
+            email: user.email!,
+            role: userData.role,
+            grade: userData.grade,
+            class_number: userData.class_number
+          }}
+          userSubjects={userSubjects || []}
         />
       </div>
     </div>

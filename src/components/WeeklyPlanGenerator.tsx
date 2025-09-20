@@ -1,58 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { createClient } from '@/lib/supabase'
-
-interface User {
-  id: string
-  email: string
-  role: 'homeroom' | 'specialist'
-  grade?: number
-  class_number?: number
-}
-
-interface Subject {
-  id: string
-  name: string
-  category: string
-}
-
-interface Publisher {
-  id: string
-  name: string
-  code: string
-}
-
-interface UserSubject {
-  id: string
-  user_id: string
-  subject_id: string
-  grade: number
-  class_number?: number
-  publisher_id: string
-  subjects: Subject
-  publishers: Publisher
-}
-
-interface TextbookUnit {
-  id: string
-  unit_name: string
-  category: string
-  suggested_hours: number
-  suggested_period: string
-  unit_order: number
-}
-
-interface WeeklyPlanCell {
-  day: number
-  period: number
-  subject_id?: string
-  unit_id?: string
-  grade?: number
-  class_number?: number
-  hours: number
-  memo?: string
-}
+import { adjustWeeklyPlanHours, generateAdjustmentSuggestions, calculateWeeklyHoursSummary } from '@/utils/scheduleAdjustment'
+import toast from 'react-hot-toast'
+import type { User, UserSubject, TextbookUnit, WeeklyPlanCell } from '@/types/common'
 
 interface WeeklyPlanGeneratorProps {
   user: User
@@ -70,16 +22,16 @@ export default function WeeklyPlanGenerator({ user, userSubjects }: WeeklyPlanGe
   const [weeklyPlan, setWeeklyPlan] = useState<WeeklyPlanCell[]>([])
   const [availableUnits, setAvailableUnits] = useState<Record<string, TextbookUnit[]>>({})
   const [loading, setLoading] = useState(false)
-  const [timeAdjustment, setTimeAdjustment] = useState<{
+  const [, setTimeAdjustment] = useState<{
     day: number
     period: number
     fraction: number
   } | null>(null)
 
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   const daysOfWeek = ['月', '火', '水', '木', '金']
-  const periods = user.role === 'homeroom' ? [1, 2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6]
+  const periods = [1, 2, 3, 4, 5, 6]
 
   // Load textbook units for user's subjects
   useEffect(() => {
@@ -144,48 +96,72 @@ export default function WeeklyPlanGenerator({ user, userSubjects }: WeeklyPlanGe
     initializePlan()
   }, [user])
 
-  const getWeekDateRange = (weekStart: string) => {
+  const getWeekDateRange = useCallback((weekStart: string) => {
     const start = new Date(weekStart)
     const end = new Date(start)
     end.setDate(start.getDate() + 4) // Friday
-    
+
     return {
       start: start.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' }),
       end: end.toLocaleDateString('ja-JP', { month: 'numeric', day: 'numeric' })
     }
-  }
+  }, [])
 
-  const updateCell = (day: number, period: number, updates: Partial<WeeklyPlanCell>) => {
-    setWeeklyPlan(prev => prev.map(cell => 
-      cell.day === day && cell.period === period 
+  const updateCell = useCallback((day: number, period: number, updates: Partial<WeeklyPlanCell>) => {
+    setWeeklyPlan(prev => prev.map(cell =>
+      cell.day === day && cell.period === period
         ? { ...cell, ...updates }
         : cell
     ))
-  }
+  }, [])
 
-  const getCellData = (day: number, period: number) => {
+  const getCellData = useCallback((day: number, period: number) => {
     return weeklyPlan.find(cell => cell.day === day && cell.period === period)
-  }
+  }, [weeklyPlan])
 
-  const getSubjectOptions = () => {
+  const getSubjectOptions = useMemo(() => {
     if (user.role === 'homeroom') {
       return userSubjects.filter(us => us.grade === user.grade)
     }
     return userSubjects
-  }
+  }, [user.role, user.grade, userSubjects])
 
-  const getUnitOptions = (subjectId: string, grade: number, classNumber?: number) => {
+  const getUnitOptions = useCallback((subjectId: string, grade: number, classNumber?: number) => {
     const key = `${subjectId}_${grade}_${classNumber || 0}`
     return availableUnits[key] || []
-  }
+  }, [availableUnits])
 
-  const handleTimeAdjustment = (day: number, period: number, fraction: number) => {
-    const eventHours = fraction
+  const handleTimeAdjustment = useCallback((day: number, period: number, fraction: number) => {
     const subjectHours = 1 - fraction
-    
+
     updateCell(day, period, { hours: subjectHours })
     setTimeAdjustment(null)
-  }
+  }, [updateCell, setTimeAdjustment])
+
+  const handleAutoAdjustment = useCallback(async () => {
+    setLoading(true)
+    try {
+      // 自動時数調整を実行
+      const adjustedPlan = adjustWeeklyPlanHours(weeklyPlan)
+      setWeeklyPlan(adjustedPlan)
+
+      // 調整結果のサマリーを取得
+      const summary = calculateWeeklyHoursSummary(adjustedPlan)
+      const suggestions = generateAdjustmentSuggestions(adjustedPlan, [])
+
+      // 結果を通知
+      toast.success(`時数調整完了！${summary.adjustedCells}コマを調整しました。`)
+
+      if (suggestions.length > 0) {
+        console.log('調整推奨事項:', suggestions)
+      }
+    } catch (error) {
+      console.error('時数調整エラー:', error)
+      toast.error('時数調整に失敗しました。')
+    } finally {
+      setLoading(false)
+    }
+  }, [weeklyPlan])
 
   const generateAutoSuggestion = async () => {
     setLoading(true)
@@ -272,7 +248,7 @@ export default function WeeklyPlanGenerator({ user, userSubjects }: WeeklyPlanGe
     }
   }
 
-  const dateRange = getWeekDateRange(selectedWeek)
+  const dateRange = useMemo(() => getWeekDateRange(selectedWeek), [getWeekDateRange, selectedWeek])
 
   return (
     <div className="space-y-6">
@@ -298,6 +274,13 @@ export default function WeeklyPlanGenerator({ user, userSubjects }: WeeklyPlanGe
               className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded"
             >
               {loading ? '生成中...' : '自動生成'}
+            </button>
+            <button
+              onClick={handleAutoAdjustment}
+              disabled={loading}
+              className="bg-orange-600 hover:bg-orange-700 disabled:bg-orange-300 text-white px-4 py-2 rounded"
+            >
+              {loading ? '調整中...' : '時数調整'}
             </button>
             <button
               onClick={saveWeeklyPlan}

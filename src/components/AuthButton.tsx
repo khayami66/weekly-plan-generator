@@ -1,7 +1,7 @@
 'use client'
 
 import { createClient } from '@/lib/supabase'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { User } from '@supabase/supabase-js'
 import toast from 'react-hot-toast'
 import { trackEvent } from '@/lib/analytics'
@@ -9,7 +9,7 @@ import { trackEvent } from '@/lib/analytics'
 export default function AuthButton() {
   const [loading, setLoading] = useState(false)
   const [user, setUser] = useState<User | null>(null)
-  const supabase = createClient()
+  const supabase = useMemo(() => createClient(), [])
 
   useEffect(() => {
     const getUser = async () => {
@@ -33,9 +33,9 @@ export default function AuthButton() {
     )
 
     return () => subscription.unsubscribe()
-  }, [])
+  }, [supabase.auth])
 
-  const handleGoogleLogin = async () => {
+  const handleGoogleLogin = useCallback(async () => {
     setLoading(true)
     try {
       const { error } = await supabase.auth.signInWithOAuth({
@@ -55,9 +55,9 @@ export default function AuthButton() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [supabase.auth])
 
-  const handleLogout = async () => {
+  const handleLogout = useCallback(async () => {
     setLoading(true)
     try {
       // フォームを作成してPOSTリクエストを送信
@@ -72,7 +72,7 @@ export default function AuthButton() {
     } finally {
       setLoading(false)
     }
-  }
+  }, [])
 
   if (user) {
     return (

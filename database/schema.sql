@@ -171,6 +171,7 @@ INSERT INTO subjects (name, category) VALUES
 
 -- 初期データ：出版社マスタ
 INSERT INTO publishers (name, code) VALUES
+('教科書なし', 'none'),
 ('東京書籍', 'tokyo'),
 ('教育出版', 'kyoiku'),
 ('光村図書出版', 'mitsumura'),

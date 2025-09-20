@@ -5,11 +5,17 @@ import { createClient } from '@/lib/supabase'
 import { User } from '@supabase/supabase-js'
 import toast from 'react-hot-toast'
 import { trackEvent } from '@/lib/analytics'
+import ScheduleSettings from './ScheduleSettings'
 
 interface SetupWizardProps {
   user: User
-  userData?: any
+  userData?: {
+    role: 'homeroom' | 'specialist'
+    grade?: number
+    class_number?: number
+  }
   isEditMode?: boolean
+  initialStep?: number
 }
 
 type Role = 'homeroom' | 'specialist'
@@ -26,9 +32,10 @@ interface Publisher {
   code: string
 }
 
-export default function SetupWizard({ user, userData, isEditMode = false }: SetupWizardProps) {
-  const [step, setStep] = useState(1)
+export default function SetupWizard({ user, userData, isEditMode = false, initialStep = 1 }: SetupWizardProps) {
+  const [step, setStep] = useState(initialStep)
   const [loading, setLoading] = useState(false)
+  const [textbooksSaved, setTextbooksSaved] = useState(false)
   const [subjects, setSubjects] = useState<Subject[]>([])
   const [publishers, setPublishers] = useState<Publisher[]>([])
   const [formData, setFormData] = useState({
@@ -80,11 +87,11 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
         console.log('SetupWizard - User subjects error:', userSubjectsError)
 
         if (userSubjects) {
-          const subjectIds = userSubjects.map(us => us.subject_id)
-          const grades = [...new Set(userSubjects.map(us => us.grade))]
+          const subjectIds = userSubjects.map((us: { subject_id: string; grade: number; publisher_id: string }) => us.subject_id)
+          const grades = [...new Set(userSubjects.map((us: { subject_id: string; grade: number; publisher_id: string }) => us.grade))]
           const textbooks: Record<string, string> = {}
 
-          userSubjects.forEach(us => {
+          userSubjects.forEach((us: { subject_id: string; grade: number; publisher_id: string }) => {
             textbooks[us.subject_id] = us.publisher_id
           })
 
@@ -105,6 +112,13 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
     loadData()
   }, [supabase, isEditMode, userData, user.id])
 
+  // Reset textbooks saved state when leaving step 3
+  useEffect(() => {
+    if (step !== 3) {
+      setTextbooksSaved(false)
+    }
+  }, [step])
+
   const grades = [1, 2, 3, 4, 5, 6]
   const availableSubjects = subjects.filter(s => 
     formData.role === 'specialist' 
@@ -119,14 +133,32 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
 
   const handleSubjectChange = (subjectId: string, checked: boolean) => {
     if (checked) {
+      const subject = subjects.find(s => s.id === subjectId)
+      const noTextbookPublisher = publishers.find(p => p.code === 'none')
+
+      // Auto-set textbook to "教科書なし" for certain subjects
+      const updatedTextbooks = { ...formData.textbooks }
+      if (noTextbookPublisher && subject) {
+        // 教科書なしが一般的な教科
+        const noTextbookSubjects = ['体育', '道徳', '総合的な学習の時間', '特別活動']
+        if (subject.category === 'その他' || noTextbookSubjects.includes(subject.name)) {
+          updatedTextbooks[subjectId] = noTextbookPublisher.id
+        }
+      }
+
       setFormData({
         ...formData,
-        subjects: [...formData.subjects, subjectId]
+        subjects: [...formData.subjects, subjectId],
+        textbooks: updatedTextbooks
       })
     } else {
+      const updatedTextbooks = { ...formData.textbooks }
+      delete updatedTextbooks[subjectId]
+
       setFormData({
         ...formData,
-        subjects: formData.subjects.filter(s => s !== subjectId)
+        subjects: formData.subjects.filter(s => s !== subjectId),
+        textbooks: updatedTextbooks
       })
     }
   }
@@ -169,6 +201,65 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
     })
   }
 
+  const saveTextbooks = async () => {
+    setLoading(true)
+    try {
+      // Delete existing user_subjects for this user
+      await supabase
+        .from('user_subjects')
+        .delete()
+        .eq('user_id', user.id)
+
+      // Save new textbook selections
+      const userSubjectsData = []
+      for (const subjectId of formData.subjects) {
+        const publisherId = formData.textbooks[subjectId]
+        if (!publisherId) continue
+
+        // Create data for each class they teach
+        if (formData.role === 'homeroom') {
+          userSubjectsData.push({
+            user_id: user.id,
+            subject_id: subjectId,
+            grade: parseInt(formData.grade),
+            class_number: parseInt(formData.classNumber),
+            publisher_id: publisherId
+          })
+        } else {
+          // For specialists, create entries for each grade/class combination
+          for (const grade of formData.teachingGrades) {
+            const classCount = formData.classCountPerGrade[grade] || 1
+            for (let classNum = 1; classNum <= classCount; classNum++) {
+              userSubjectsData.push({
+                user_id: user.id,
+                subject_id: subjectId,
+                grade: grade,
+                class_number: classNum,
+                publisher_id: publisherId
+              })
+            }
+          }
+        }
+      }
+
+      if (userSubjectsData.length > 0) {
+        const { error: subjectsError } = await supabase
+          .from('user_subjects')
+          .insert(userSubjectsData)
+
+        if (subjectsError) throw subjectsError
+      }
+
+      setTextbooksSaved(true)
+      toast.success('教科書設定を保存しました！')
+    } catch (error) {
+      console.error('Error saving textbooks:', error)
+      toast.error('教科書設定の保存に失敗しました。')
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const handleSubmit = async () => {
     setLoading(true)
     try {
@@ -180,7 +271,7 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
             role: formData.role,
             grade: formData.role === 'homeroom' ? parseInt(formData.grade) : null,
             class_number: formData.role === 'homeroom' ? parseInt(formData.classNumber) : null
-          })
+          } as any)
           .eq('id', user.id)
 
         if (userError) throw userError
@@ -202,7 +293,7 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
             role: formData.role,
             grade: formData.role === 'homeroom' ? parseInt(formData.grade) : null,
             class_number: formData.role === 'homeroom' ? parseInt(formData.classNumber) : null
-          })
+          } as any)
 
         if (userError) throw userError
       }
@@ -218,7 +309,7 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
               grade: parseInt(formData.grade),
               class_number: parseInt(formData.classNumber),
               publisher_id: formData.textbooks[subjectId]
-            })
+            } as any)
           if (error) throw error
         } else {
           // Specialist teacher
@@ -232,7 +323,7 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
                   grade,
                   class_number: classNum,
                   publisher_id: formData.textbooks[subjectId]
-                })
+                } as any)
               if (error) throw error
             }
           }
@@ -272,7 +363,7 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
             初期設定
           </h1>
           <p className="text-gray-600">
-            ステップ {step} / 4
+            ステップ {step} / 5
           </p>
         </div>
 
@@ -445,25 +536,50 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
         {step === 3 && (
           <div>
             <h2 className="text-xl font-semibold mb-6">使用教科書を選択してください</h2>
-            
+
             {formData.subjects.map(subjectId => {
               const subject = subjects.find(s => s.id === subjectId)
+              const noTextbookPublisher = publishers.find(p => p.code === 'none')
+
+              // Determine default value based on subject category
+              const getDefaultValue = () => {
+                if (formData.textbooks[subjectId]) {
+                  return formData.textbooks[subjectId]
+                }
+                // Default to "教科書なし" for subjects in "その他" category
+                if (subject?.category === 'その他' && noTextbookPublisher) {
+                  return noTextbookPublisher.id
+                }
+                return ''
+              }
+
               return (
                 <div key={subjectId} className="mb-4">
                   <label className="block text-sm font-medium text-gray-700 mb-2">
                     {subject?.name}
                   </label>
                   <select
-                    value={formData.textbooks[subjectId] || ''}
+                    value={getDefaultValue()}
                     onChange={(e) => handleTextbookChange(subjectId, e.target.value)}
                     className="w-full border border-gray-300 rounded-md px-3 py-2"
                   >
                     <option value="">選択してください</option>
-                    {publishers.map(publisher => (
-                      <option key={publisher.id} value={publisher.id}>
-                        {publisher.name}
-                      </option>
-                    ))}
+                    {/* 教科書なしを最初に表示 */}
+                    {publishers
+                      .filter(p => p.code === 'none')
+                      .map(publisher => (
+                        <option key={publisher.id} value={publisher.id}>
+                          {publisher.name}
+                        </option>
+                      ))}
+                    {/* その他の出版社 */}
+                    {publishers
+                      .filter(p => p.code !== 'none')
+                      .map(publisher => (
+                        <option key={publisher.id} value={publisher.id}>
+                          {publisher.name}
+                        </option>
+                      ))}
                   </select>
                 </div>
               )
@@ -476,70 +592,56 @@ export default function SetupWizard({ user, userData, isEditMode = false }: Setu
               >
                 戻る
               </button>
-              <button
-                onClick={() => setStep(4)}
-                disabled={formData.subjects.some(subjectId => !formData.textbooks[subjectId])}
-                className="bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-6 py-2 rounded"
-              >
-                次へ
-              </button>
+              {!textbooksSaved ? (
+                <button
+                  onClick={saveTextbooks}
+                  disabled={formData.subjects.some(subjectId => !formData.textbooks[subjectId]) || loading}
+                  className="bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white px-6 py-2 rounded"
+                >
+                  {loading ? '保存中...' : '保存'}
+                </button>
+              ) : (
+                <button
+                  onClick={() => setStep(4)}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded"
+                >
+                  次へ
+                </button>
+              )}
             </div>
           </div>
         )}
 
         {step === 4 && (
           <div>
-            <h2 className="text-xl font-semibold mb-6">設定内容を確認してください</h2>
-            
-            <div className="bg-gray-50 p-4 rounded-lg mb-6">
-              <h3 className="font-medium mb-2">役割</h3>
-              <p>{formData.role === 'homeroom' ? '学級担任' : '専科教員'}</p>
-              
-              {formData.role === 'homeroom' && (
-                <>
-                  <h3 className="font-medium mb-2 mt-4">担当学級</h3>
-                  <p>{formData.grade}年{formData.classNumber}組</p>
-                </>
-              )}
-              
-              {formData.role === 'specialist' && (
-                <>
-                  <h3 className="font-medium mb-2 mt-4">担当学年・クラス数</h3>
-                  {formData.teachingGrades.map(grade => (
-                    <p key={grade}>{grade}年: {formData.classCountPerGrade[grade]}クラス</p>
-                  ))}
-                </>
-              )}
-              
-              <h3 className="font-medium mb-2 mt-4">担当教科・教科書</h3>
-              {formData.subjects.map(subjectId => {
-                const subject = subjects.find(s => s.id === subjectId)
-                const publisher = publishers.find(p => p.id === formData.textbooks[subjectId])
-                return (
-                  <p key={subjectId}>
-                    {subject?.name}: {publisher?.name}
-                  </p>
-                )
-              })}
-            </div>
+            <h2 className="text-xl font-semibold mb-6">基本時間割を設定してください</h2>
+            <p className="text-gray-600 mb-6">
+              週案作成に使用する基本的な時間割パターンを設定します。後から変更することも可能です。
+            </p>
 
-            <div className="flex justify-between">
-              <button
-                onClick={() => setStep(3)}
-                className="bg-gray-500 hover:bg-gray-600 text-white px-6 py-2 rounded"
-              >
-                戻る
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={loading}
-                className="bg-green-600 hover:bg-green-700 disabled:bg-green-300 text-white px-6 py-2 rounded"
-              >
-                {loading ? '保存中...' : '設定を保存'}
-              </button>
-            </div>
+            <ScheduleSettings
+              user={{
+                id: user.id,
+                email: user.email!,
+                role: formData.role,
+                grade: formData.role === 'homeroom' ? parseInt(formData.grade) : undefined,
+                class_number: formData.role === 'homeroom' ? parseInt(formData.classNumber) : undefined
+              }}
+              userSubjects={formData.subjects.map(subjectId => ({
+                id: `temp-${subjectId}`,
+                user_id: user.id,
+                subject_id: subjectId,
+                grade: formData.role === 'homeroom' ? parseInt(formData.grade) : parseInt(formData.teachingGrades[0]?.toString() || '5'),
+                class_number: formData.role === 'homeroom' ? parseInt(formData.classNumber) : 1,
+                publisher_id: formData.textbooks[subjectId],
+                subjects: subjects.find(s => s.id === subjectId) || { id: subjectId, name: '不明', category: '' }
+              }))}
+              onSave={handleSubmit}
+              onBack={() => setStep(3)}
+            />
           </div>
         )}
+
       </div>
     </div>
   )

@@ -74,7 +74,7 @@ export default function AuthTest() {
 
   const testSupabaseConnection = async () => {
     try {
-      const { data, error } = await supabase
+      const { error } = await supabase
         .from('users')
         .select('count')
         .limit(1)
